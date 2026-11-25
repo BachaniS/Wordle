@@ -1,31 +1,38 @@
 import { Peer } from 'peerjs';
 
-// Peer-to-peer link between two browsers using PeerJS (WebRTC data channels).
-// PeerJS's free public server is only used to introduce the two browsers; game data
-// and chat travel directly between them. Handles heartbeats and reconnection.
+// Peer-to-peer links between browsers using PeerJS (WebRTC data channels). Rooms are a
+// star: the host accepts a connection from each guest, and guests only talk to the host.
+// PeerJS's free public server is only used to introduce the browsers; game data and chat
+// travel directly between them. Handles heartbeats and reconnection.
 
-const PREFIX = 'wordle-together-v1-';
+const PREFIX = 'wordle-together-v2-'; // v2: rooms for up to four (not compatible with v1)
 const PING_MS = 3000;
 const TIMEOUT_MS = 15000;
+const MAX_CONNS = 8; // more than a full room needs, to allow for reconnects overlapping
 
 const peerId = (code) => PREFIX + code.toLowerCase();
 
 /**
  * Statuses reported through onStatus:
  *  connecting   – talking to the matchmaking server
- *  waiting      – host is online, partner not connected
+ *  waiting      – host is online, no guests connected
  *  searching    – guest can't find the room (yet)
- *  connected    – direct link is up
+ *  connected    – guest: direct link to the host is up; host: at least one guest is connected
  *  reconnecting – link dropped, trying again
  *  taken        – host: this room code is already in use
  *  error        – unrecoverable (see onError)
+ *
+ * On the host, onOpen / onMessage / onLost also get a key naming the guest connection,
+ * and send(msg, key) talks to that one guest.
  */
 export class Link {
   constructor(handlers) {
     this.h = handlers;
     this.peer = null;
-    this.conn = null;
-    this.pending = null;
+    this.conn = null; // guest: the link to the host
+    this.pending = null; // guest: a connection still opening
+    this.guests = new Map(); // host: key -> { conn, lastSeen }
+    this.nextKey = 1;
     this.closed = false;
     this.status = null;
     this.timers = new Set();
@@ -50,14 +57,25 @@ export class Link {
     this.makePeer();
   }
 
-  send(msg) {
-    if (!this.conn?.open) return false;
+  /** Guest: send to the host. Host: send to the guest connection `key`. */
+  send(msg, key) {
+    const conn = this.role === 'host' ? this.guests.get(key)?.conn : this.conn;
+    if (!conn?.open) return false;
     try {
-      this.conn.send(msg);
+      conn.send(msg);
       return true;
     } catch {
       return false;
     }
+  }
+
+  /** Host: close one guest's connection. onLost is not called for it. */
+  hangUp(key) {
+    const g = this.guests.get(key);
+    if (!g) return;
+    this.guests.delete(key);
+    try { g.conn.close(); } catch {}
+    this.hostStatus();
   }
 
   close() {
@@ -66,6 +84,8 @@ export class Link {
     this.timers.forEach(clearTimeout);
     document.removeEventListener('visibilitychange', this.onVisible);
     try { this.conn?.close(); } catch {}
+    for (const { conn } of this.guests.values()) try { conn.close(); } catch {}
+    this.guests.clear();
     this.peer?.destroy();
   }
 
@@ -85,6 +105,15 @@ export class Link {
     this.h.onStatus?.(s);
   }
 
+  hostStatus() {
+    if (!this.closed) this.setStatus(this.guests.size ? 'connected' : 'waiting');
+  }
+
+  /** Is anything connected? (Host: any guest. Guest: the host.) */
+  get linked() {
+    return this.role === 'host' ? this.guests.size > 0 : !!this.conn;
+  }
+
   makePeer() {
     this.peer?.destroy();
     const peer = new Peer(this.role === 'host' ? peerId(this.code) : undefined, { debug: 0 });
@@ -93,13 +122,18 @@ export class Link {
       if (peer !== this.peer) return;
       this.everOpen = true;
       if (this.role === 'host') {
-        if (!this.conn) this.setStatus('waiting');
+        if (!this.linked) this.setStatus('waiting');
       } else if (!this.conn) {
         this.connect();
       }
     });
     peer.on('connection', (conn) => {
-      if (peer === this.peer && this.role === 'host') this.wire(conn);
+      if (peer !== this.peer || this.role !== 'host') return;
+      if (this.guests.size >= MAX_CONNS) {
+        try { conn.close(); } catch {}
+        return;
+      }
+      this.wireGuest(conn);
     });
     peer.on('disconnected', () => {
       if (peer === this.peer) this.scheduleRevive(2000);
@@ -127,8 +161,8 @@ export class Link {
         this.h.onError?.('This browser does not support peer-to-peer connections. Try Chrome, Safari or Firefox.');
         break;
       default:
-        // Network / server hiccups. An existing direct connection usually survives these.
-        if (!this.conn) this.setStatus('reconnecting');
+        // Network / server hiccups. Existing direct connections usually survive these.
+        if (!this.linked) this.setStatus('reconnecting');
         this.scheduleRevive(3000);
     }
   }
@@ -165,6 +199,7 @@ export class Link {
     }, ms);
   }
 
+  /** Guest: open a connection to the host. */
   connect() {
     if (this.closed || this.conn || this.role !== 'guest') return;
     const p = this.peer;
@@ -173,7 +208,7 @@ export class Link {
     try { this.pending?.close(); } catch {}
     const conn = p.connect(peerId(this.code), { reliable: true, serialization: 'json' });
     this.pending = conn;
-    this.wire(conn);
+    this.wireHost(conn);
     this.later(() => {
       if (conn === this.pending && !conn.open) {
         this.pending = null;
@@ -183,9 +218,10 @@ export class Link {
     }, 10000);
   }
 
-  wire(conn) {
+  /** Guest: the connection to the host. */
+  wireHost(conn) {
     conn.on('open', () => {
-      if (this.closed || (this.role === 'guest' && conn !== this.pending)) {
+      if (this.closed || conn !== this.pending) {
         conn.close();
         return;
       }
@@ -203,31 +239,77 @@ export class Link {
       this.lastSeen = Date.now();
       if (d && typeof d === 'object' && d.t !== 'ping') this.h.onMessage?.(d);
     });
-    const lost = () => this.drop(conn);
+    const lost = () => this.dropHost(conn);
     conn.on('close', lost);
     conn.on('error', lost);
   }
 
-  drop(conn) {
+  dropHost(conn) {
     if (conn !== this.conn) return;
     this.conn = null;
     try { conn.close(); } catch {}
     if (this.closed) return;
-    this.setStatus(this.role === 'host' ? 'waiting' : 'reconnecting');
+    this.setStatus('reconnecting');
     this.h.onLost?.();
-    if (this.role === 'guest') this.scheduleConnect(1000);
+    this.scheduleConnect(1000);
+  }
+
+  /** Host: a connection from one guest. */
+  wireGuest(conn) {
+    let key = null;
+    conn.on('open', () => {
+      if (this.closed) {
+        conn.close();
+        return;
+      }
+      key = this.nextKey++;
+      this.guests.set(key, { conn, lastSeen: Date.now() });
+      this.setStatus('connected');
+      this.h.onOpen?.(key);
+    });
+    conn.on('data', (d) => {
+      const g = this.guests.get(key);
+      if (!g || g.conn !== conn) return;
+      g.lastSeen = Date.now();
+      if (d && typeof d === 'object' && d.t !== 'ping') this.h.onMessage?.(d, key);
+    });
+    const lost = () => this.dropGuest(key, conn);
+    conn.on('close', lost);
+    conn.on('error', lost);
+  }
+
+  dropGuest(key, conn) {
+    const g = this.guests.get(key);
+    if (!g || g.conn !== conn) return;
+    this.guests.delete(key);
+    try { conn.close(); } catch {}
+    if (this.closed) return;
+    this.hostStatus();
+    this.h.onLost?.(key);
   }
 
   heartbeat() {
+    const now = Date.now();
+    if (this.role === 'host') {
+      for (const [key, g] of this.guests) {
+        if (now - g.lastSeen > TIMEOUT_MS) this.dropGuest(key, g.conn);
+        else try { g.conn.send({ t: 'ping' }); } catch {}
+      }
+      return;
+    }
     const c = this.conn;
     if (!c) return;
-    if (Date.now() - this.lastSeen > TIMEOUT_MS) return this.drop(c);
+    if (now - this.lastSeen > TIMEOUT_MS) return this.dropHost(c);
     try { c.send({ t: 'ping' }); } catch {}
   }
 
   wake() {
     if (this.closed) return;
-    if (this.conn && Date.now() - this.lastSeen > TIMEOUT_MS) this.drop(this.conn);
+    if (this.role === 'host') {
+      for (const [key, g] of this.guests) if (Date.now() - g.lastSeen > TIMEOUT_MS) this.dropGuest(key, g.conn);
+    } else if (this.conn && Date.now() - this.lastSeen > TIMEOUT_MS) {
+      this.dropHost(this.conn);
+    }
     this.revive();
   }
 }

@@ -56,7 +56,7 @@ export function Home({ invited, onSolo, onCreate, onJoin }) {
             </span>
           ))}
         </div>
-        <p className="tagline">Wordle for two. Team up, race, or send each other words.</p>
+        <p className="tagline">Wordle for 2–4 players. Team up, race, or send each other words.</p>
 
         {invited && (
           <div className="card invite">
@@ -103,7 +103,7 @@ export function Home({ invited, onSolo, onCreate, onJoin }) {
               Join
             </button>
           </form>
-          <p className="hint">Co-op, Race and Word Duel, with chat. Share the room link — no accounts needed.</p>
+          <p className="hint">Co-op, Race and Word Duel for up to 4, with chat. Share the room link — no accounts needed.</p>
         </div>
 
         <div className="card">

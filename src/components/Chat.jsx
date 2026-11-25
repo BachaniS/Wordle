@@ -35,7 +35,7 @@ export function Chat({ chat, me, open, onClose, onSend, conn }) {
         </button>
       </div>
       <div className="chat-log" ref={logRef} onScroll={onScroll} aria-live="polite">
-        {chat.length === 0 && <div className="msg sys">Messages go straight between the two of you.</div>}
+        {chat.length === 0 && <div className="msg sys">Messages only travel between the browsers in this room.</div>}
         {chat.map((m) =>
           m.sys ? (
             <div key={m.id} className="msg sys">

@@ -17,6 +17,8 @@
   --accent-text: #ffffff;
   --pA: #2f7fe0;
   --pB: #d9467e;
+  --pC: #8250df;
+  --pD: #0e8a7e;
   --toast-bg: #1a1a1b;
   --toast-text: #ffffff;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.14);
@@ -41,6 +43,8 @@
     --accent: #538d4e;
     --pA: #4d94f0;
     --pB: #e2588f;
+  --pC: #a07cf0;
+  --pD: #1fa596;
     --toast-bg: #f2f2f3;
     --toast-text: #121213;
     --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
@@ -64,11 +68,18 @@
   --accent: #538d4e;
   --pA: #4d94f0;
   --pB: #e2588f;
+  --pC: #a07cf0;
+  --pD: #1fa596;
   --toast-bg: #f2f2f3;
   --toast-text: #121213;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
   color-scheme: dark;
 }
+
+[data-p="A"] { --p: var(--pA); }
+[data-p="B"] { --p: var(--pB); }
+[data-p="C"] { --p: var(--pC); }
+[data-p="D"] { --p: var(--pD); }
 
 :root.contrast {
   --correct: #f5793a;
@@ -344,16 +355,18 @@ main { flex: 1; min-height: 0; display: flex; }
   font-weight: 800;
 }
 .row .by:empty { display: none; }
-.by[data-p="A"] { background: var(--pA); }
-.by[data-p="B"] { background: var(--pB); }
+.by[data-p] { background: var(--p); }
 
 /* opponent mini board */
-.opp { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.opps { flex: none; display: grid; grid-template-columns: repeat(var(--opp-cols, 1), auto); gap: 10px; align-items: start; justify-items: center; }
+.opp { flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: calc(var(--mini) * 5 + 32px); }
 .opp .board, .opp .row { gap: 3px; }
 .opp .row { grid-template-columns: repeat(5, var(--mini)); }
 .opp .tile { width: var(--mini); height: var(--mini); border-width: 1px; font-size: calc(var(--mini) * 0.56); }
-.opp-name { font-size: 13px; font-weight: 700; white-space: nowrap; }
-.opp-note { font-size: 11px; color: var(--muted); text-align: center; max-width: calc(var(--mini) * 5 + 30px); }
+.opp-name { max-width: 100%; display: flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.opp-name .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--p); }
+.opp-name .n { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.opp-note { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); text-align: center; }
 .hide-letters .tile { color: transparent !important; }
 
 /* ---------- Keyboard ---------- */
@@ -422,7 +435,7 @@ main { flex: 1; min-height: 0; display: flex; }
   gap: 8px;
   padding: 8px 2px 4px;
 }
-.scoreboard { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.scoreboard { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-width: 0; }
 .pchip {
   min-width: 0;
   display: inline-flex;
@@ -434,14 +447,16 @@ main { flex: 1; min-height: 0; display: flex; }
   background: var(--surface);
   font-size: 14px;
 }
-.pchip[data-p="A"] { border-color: color-mix(in srgb, var(--pA) 55%, var(--border)); }
-.pchip[data-p="B"] { border-color: color-mix(in srgb, var(--pB) 55%, var(--border)); }
+.pchip[data-p] { border-color: color-mix(in srgb, var(--p) 55%, var(--border)); }
+.pchip.me { background: color-mix(in srgb, var(--p) 14%, var(--surface)); }
 .pchip .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--correct); }
 .pchip.offline .dot { background: var(--border-strong); }
 .pchip.offline .pname { color: var(--muted); }
 .pname { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .pscore { font-weight: 800; font-variant-numeric: tabular-nums; }
 .vs { font-size: 12px; color: var(--muted); }
+.chip-x { margin: -2px -4px -2px -2px; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; }
+.chip-x:hover { background: var(--surface-2); color: var(--text); }
 .room-actions { display: flex; align-items: center; gap: 4px; }
 
 .badge {
@@ -542,8 +557,7 @@ main { flex: 1; min-height: 0; display: flex; }
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.msg[data-p="A"] .bubble { background: var(--pA); }
-.msg[data-p="B"] .bubble { background: var(--pB); }
+.msg[data-p] .bubble { background: var(--p); }
 .msg .bubble.big { padding: 0 2px; font-size: 30px; background: none !important; }
 .msg.sys { align-self: center; max-width: 95%; font-size: 12px; text-align: center; color: var(--muted); }
 .reactions { display: flex; justify-content: space-around; padding: 4px 6px; border-top: 1px solid var(--border); }

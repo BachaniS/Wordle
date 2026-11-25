@@ -58,16 +58,16 @@ export function HelpPanel() {
       <ul>
         <li><b>Daily</b> — one word a day, the same for everyone. Compare results!</li>
         <li><b>Unlimited</b> — as many random words as you like.</li>
-        <li><b>🤝 Co-op</b> — one shared board. Take turns (or not) and talk it out in chat.</li>
-        <li><b>🏁 Race</b> — same word, separate boards. You see the colours on the other board but not the letters. First to solve it wins.</li>
-        <li><b>🎯 Word Duel</b> — you each pick a word for the other to guess, and you can watch them work on yours. Fewest guesses wins.</li>
+        <li><b>🤝 Co-op</b> — one shared board. Take turns round the table (or not) and talk it out in chat.</li>
+        <li><b>🏁 Race</b> — same word, separate boards. You see the colours on everyone else's board but not the letters. First to solve it wins.</li>
+        <li><b>🎯 Word Duel</b> — everyone picks a word for the next player to guess, and you can watch them work on yours. Fewest guesses wins, and ties share the win.</li>
         <li><b>Challenge links</b> — pick a word and send a link. You don't need to be online at the same time.</li>
       </ul>
 
       <h3>Playing together</h3>
       <p>
-        One of you taps “Create a room” and sends the invite link. Games and chat go straight between your two
-        browsers. If someone refreshes or loses signal, the room reconnects by itself.
+        One of you taps “Create a room” and sends the invite link. Up to 4 people can play. Games and chat go
+        straight between your browsers. If someone refreshes or loses signal, the room reconnects by itself.
       </p>
       <p className="muted">Hard mode: any hints you've been shown must be used in later guesses.</p>
     </div>

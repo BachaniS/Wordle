@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { MODES, other } from '../lib/room.js';
+import { MODES, MAX_PLAYERS, listNames, playerName, seated } from '../lib/room.js';
 import { rooms } from '../lib/rooms.js';
 import { shareMessage, shareOrCopy } from '../lib/share.js';
 import { Chat } from '../components/Chat.jsx';
@@ -16,6 +16,8 @@ const CONN_LABELS = {
   connected: 'Connected',
   reconnecting: 'Reconnecting…',
   taken: 'Room unavailable',
+  full: 'Room full',
+  replaced: 'Open in another tab',
   error: 'Offline',
 };
 
@@ -28,11 +30,13 @@ export function RoomScreen({ snap, onLeave }) {
   const [readUpTo, setReadUpTo] = useState(() => snap.chat.at(-1)?.id ?? 0);
   const [floaters, setFloaters] = useState([]);
 
-  const s = snap.state;
-  const me = snap.role;
-  const them = other(me);
-  const name = (q) => s?.players[q]?.name || (q === 'A' ? 'Host' : 'Guest');
-  const partnerHere = snap.status === 'connected' && !!s?.players[them]?.online;
+  const me = snap.me;
+  const s = me ? snap.state : null;
+  const seats = s ? seated(s) : [];
+  const name = (q) => playerName(s, q);
+  const connected = snap.status === 'connected';
+  const isOnline = (q) => (q === me ? connected || (snap.host && snap.status === 'waiting') : connected && !!s?.players[q]?.online);
+  const othersHere = seats.some((q) => q !== me && isOnline(q));
   const lastId = snap.chat.at(-1)?.id ?? 0;
 
   useEffect(() => {
@@ -61,34 +65,56 @@ export function RoomScreen({ snap, onLeave }) {
       if (react) float(text);
       return true;
     }
-    if (String(text).trim()) toast(partnerHere ? 'Not connected — message not sent' : 'Nobody here yet to chat with');
+    if (String(text).trim()) toast(othersHere ? 'Not connected — message not sent' : 'Nobody here yet to chat with');
     return false;
   };
 
   const toLobby = async () => {
-    if (s.game.phase !== 'over' && !(await confirm('End this round for both of you and go back to the lobby?', 'End round'))) return;
+    if (s.game.phase !== 'over' && !(await confirm('End this round for everyone and go back to the lobby?', 'End round'))) return;
     session.act({ type: 'lobby' });
   };
 
-  const chip = (q) => {
-    const online = q === me ? snap.status === 'connected' || (me === 'A' && snap.status === 'waiting') : partnerHere;
-    return (
-      <span className={online ? 'pchip' : 'pchip offline'} data-p={q}>
-        <i className="dot" />
-        <b className="pname">{q === me ? `${name(q)} (you)` : s?.players[q]?.name || 'Waiting…'}</b>
-        <span className="pscore">{s?.scores[q] ?? 0}</span>
-      </span>
-    );
+  const removePlayer = async (q) => {
+    if (await confirm(`Remove ${name(q)} from the room? Their seat opens up for someone new.`, 'Remove')) {
+      session.act({ type: 'kick', seat: q });
+    }
   };
+
+  // With two players: "Ann (you) vs Ben". With more, your own chip just says "You".
+  const crowd = seats.length > 2;
+  const chip = (q) => (
+    <span key={q} className={`pchip${isOnline(q) ? '' : ' offline'}${q === me ? ' me' : ''}`} data-p={q}>
+      <i className="dot" />
+      <b className="pname">{q !== me ? name(q) : crowd ? 'You' : `${name(q)} (you)`}</b>
+      <span className="pscore">{s.scores[q] ?? 0}</span>
+      {snap.host && q !== me && !s.players[q].online && (
+        <button className="chip-x" type="button" aria-label={`Remove ${name(q)}`} title="Remove from room" onClick={() => removePlayer(q)}>
+          ×
+        </button>
+      )}
+    </span>
+  );
 
   return (
     <section className="screen room">
       <div className="game-col">
         <div className="room-head">
           <div className="scoreboard" title={s?.scores.draws ? `${s.scores.draws} draw${s.scores.draws > 1 ? 's' : ''}` : undefined}>
-            {chip(me)}
-            <span className="vs">vs</span>
-            {chip(them)}
+            {seats.length === 2 ? (
+              <>
+                {chip(me)}
+                <span className="vs">vs</span>
+                {chip(seats.find((q) => q !== me))}
+              </>
+            ) : (
+              seats.map(chip)
+            )}
+            {seats.length === 1 && (
+              <span className="pchip offline">
+                <i className="dot" />
+                <b className="pname">Waiting…</b>
+              </span>
+            )}
           </div>
           <div className="room-actions">
             {s?.game && (
@@ -103,9 +129,9 @@ export function RoomScreen({ snap, onLeave }) {
           </div>
         </div>
 
-        <ConnBanner snap={snap} partner={s?.players[them]} onCancel={() => onLeave(false)} />
+        <ConnBanner snap={snap} s={s} name={name} onCancel={() => onLeave(false)} />
 
-        {s && !s.game && <Lobby snap={snap} session={session} partnerHere={partnerHere} onLeave={() => onLeave(true)} />}
+        {s && !s.game && <Lobby snap={snap} session={session} othersHere={othersHere} onLeave={() => onLeave(true)} />}
         {s?.game && <Match key={s.game.id} snap={snap} session={session} />}
       </div>
 
@@ -116,8 +142,8 @@ export function RoomScreen({ snap, onLeave }) {
         onClose={() => setChatOpen(false)}
         onSend={send}
         conn={{
-          label: me === 'B' && snap.status === 'waiting' ? CONN_LABELS.connecting : CONN_LABELS[snap.status],
-          state: snap.status === 'connected' ? 'ok' : snap.status === 'waiting' && me === 'A' ? 'idle' : 'warn',
+          label: !snap.host && snap.status === 'waiting' ? CONN_LABELS.connecting : CONN_LABELS[snap.status],
+          state: connected ? 'ok' : snap.status === 'waiting' && snap.host ? 'idle' : 'warn',
         }}
       />
 
@@ -132,17 +158,20 @@ export function RoomScreen({ snap, onLeave }) {
   );
 }
 
-function ConnBanner({ snap, partner, onCancel }) {
+function ConnBanner({ snap, s, name, onCancel }) {
   const st = snap.status;
   let msg = null;
   let action = null;
-  if (snap.error) {
+  if (st === 'full' || st === 'replaced') {
     msg = snap.error;
-  } else if (snap.role === 'B') {
+    action = 'Leave';
+  } else if (snap.error) {
+    msg = snap.error;
+  } else if (!snap.host) {
     if (st === 'searching') {
-      msg = `Looking for room ${snap.code}… Make sure your partner has it open and the code is right.`;
+      msg = `Looking for room ${snap.code}… Make sure the host has it open and the code is right.`;
       action = 'Cancel';
-    } else if (!snap.state && (st === 'connecting' || st === 'connected')) {
+    } else if (!s && (st === 'connecting' || st === 'connected')) {
       msg = `Joining room ${snap.code}…`;
       action = 'Cancel';
     } else if (st === 'reconnecting') {
@@ -152,9 +181,14 @@ function ConnBanner({ snap, partner, onCancel }) {
     msg = `Couldn't reopen room ${snap.code}. Leave and create a new room.`;
     action = 'Leave';
   } else if (st === 'connecting' || st === 'reconnecting') {
-    msg = snap.state?.players.B.name ? 'Reconnecting to the server…' : 'Opening room…';
-  } else if (partner?.name && !partner.online) {
-    msg = `${partner.name} disconnected — the game will carry on when they're back.`;
+    msg = s && seated(s).length > 1 ? 'Reconnecting to the server…' : 'Opening room…';
+  }
+  if (!msg && s) {
+    const gone = seated(s).filter((q) => q !== snap.me && !s.players[q].online && s.players[q].name);
+    if (gone.length) {
+      msg = `${listNames(gone.map(name))} disconnected — they can rejoin any time.`;
+      if (snap.host) msg += ` Tap × by ${gone.length > 1 ? 'a name' : 'their name'} to free up the seat.`;
+    }
   }
   if (!msg) return null;
   return (
@@ -169,9 +203,10 @@ function ConnBanner({ snap, partner, onCancel }) {
   );
 }
 
-function Lobby({ snap, session, partnerHere, onLeave }) {
+function Lobby({ snap, session, othersHere, onLeave }) {
   const { toast } = useUI();
   const s = snap.state;
+  const count = seated(s).length;
 
   const copyInvite = async () => {
     const url = `${location.origin}${location.pathname}?room=${snap.code}`;
@@ -183,10 +218,12 @@ function Lobby({ snap, session, partnerHere, onLeave }) {
 
   return (
     <div className="lobby">
-      {snap.role === 'A' && !partnerHere && (
+      {snap.host && !othersHere && (
         <div className="card invite-card">
-          <h2>Invite your partner</h2>
-          <p className="hint">Send them this link (or the code). You can pick a game once they join.</p>
+          <h2>Invite your friends</h2>
+          <p className="hint">
+            Send them this link (or the code). Up to {MAX_PLAYERS} can play, and you can pick a game as soon as one person joins.
+          </p>
           <div className="room-code">{snap.code}</div>
           <button className="btn primary" type="button" onClick={copyInvite}>
             Copy invite link
@@ -197,7 +234,7 @@ function Lobby({ snap, session, partnerHere, onLeave }) {
       <h2 className="lobby-title">Pick a game</h2>
       <div className="mode-grid">
         {Object.entries(MODES).map(([mode, info]) => (
-          <button key={mode} className="mode-card" type="button" disabled={!partnerHere} onClick={() => session.act({ type: 'start', mode })}>
+          <button key={mode} className="mode-card" type="button" disabled={!othersHere} onClick={() => session.act({ type: 'start', mode })}>
             <span className="mode-icon">{info.icon}</span>
             <b>{info.name}</b>
             <small>{info.blurb}</small>
@@ -205,22 +242,30 @@ function Lobby({ snap, session, partnerHere, onLeave }) {
         ))}
       </div>
       <div className="opts">
-        <Switch checked={s.opts.hard} disabled={!partnerHere} onChange={(hard) => setOpt({ hard })}>
+        <Switch checked={s.opts.hard} disabled={!othersHere} onChange={(hard) => setOpt({ hard })}>
           Hard mode
         </Switch>
-        <Switch checked={s.opts.turns} disabled={!partnerHere} onChange={(turns) => setOpt({ turns })}>
+        <Switch checked={s.opts.turns} disabled={!othersHere} onChange={(turns) => setOpt({ turns })}>
           Co-op: take turns
         </Switch>
       </div>
       <p className="hint center">
-        {partnerHere
-          ? `Either of you can pick — it starts for both.${record}`
-          : snap.role === 'A'
-            ? 'Waiting for your partner to join…'
+        {othersHere
+          ? `Anyone can pick — it starts for everyone who's here.${record}`
+          : snap.host
+            ? 'Waiting for someone to join…'
             : 'Waiting for the host…'}
       </p>
       <p className="room-meta">
-        Room <b>{snap.code}</b> ·{' '}
+        Room <b>{snap.code}</b> · {count}/{MAX_PLAYERS} players ·{' '}
+        {count < MAX_PLAYERS && (snap.host ? othersHere : true) && (
+          <>
+            <button className="linkish" type="button" onClick={copyInvite}>
+              Invite
+            </button>{' '}
+            ·{' '}
+          </>
+        )}
         <button className="linkish" type="button" onClick={onLeave}>
           Leave room
         </button>

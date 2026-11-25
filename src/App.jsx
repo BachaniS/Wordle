@@ -88,7 +88,7 @@ export default function App() {
     <>
       <Header showBack={screen !== 'home'} onBack={() => (screen === 'room' ? leaveRoom(true) : goHome())} onPanel={setPanel} />
       <main>
-        {screen === 'room' && <RoomScreen key={`${room.role}-${room.code}`} snap={room} onLeave={leaveRoom} />}
+        {screen === 'room' && <RoomScreen key={`${room.host ? 'host' : 'guest'}-${room.code}`} snap={room} onLeave={leaveRoom} />}
         {screen === 'solo' && <Solo key={soloRun} start={view.start} />}
         {screen === 'home' && <Home invited={view.invited} onSolo={startSolo} onCreate={() => enterRoom()} onJoin={enterRoom} />}
       </main>
